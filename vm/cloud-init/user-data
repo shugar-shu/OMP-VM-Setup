@@ -1,0 +1,63 @@
+#cloud-config
+# omp guest VM. Placeholders (__SSH_PUBKEY__) are substituted by ../create-vm.sh.
+hostname: omp-vm
+manage_etc_hosts: true
+timezone: UTC
+
+users:
+  - name: omp
+    gecos: omp agent user
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+
+ssh_pwauth: false
+package_update: true
+package_upgrade: false
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - unzip
+  - python3
+  - python3-venv
+  - build-essential
+
+write_files:
+  # Provider credentials / broker pointer. Fill in one of the two blocks after first boot,
+  # or let host-link.sh --broker do it.
+  - path: /home/omp/.omp/agent/.env
+    owner: omp:omp
+    permissions: "0600"
+    defer: true
+    content: |
+      # Option A: direct provider key (pick any provider from docs/providers.md)
+      # ANTHROPIC_API_KEY=
+      # OPENAI_API_KEY=
+      # OPENROUTER_API_KEY=
+      #
+      # Option B: borrow the host omp's credentials through its auth-broker.
+      # 10.0.2.2 is the host as seen from a QEMU user-mode network.
+      # OMP_AUTH_BROKER_URL=http://10.0.2.2:8765
+      # OMP_AUTH_BROKER_TOKEN=
+  - path: /home/omp/.omp/agent/config.yml
+    owner: omp:omp
+    permissions: "0644"
+    defer: true
+    content: |
+      startup:
+        quiet: true
+      tools:
+        # Guest is disposable: let the agent act without per-tool prompts.
+        approvalMode: yolo
+
+runcmd:
+  # Prebuilt binary; falls back to source via bun only when bun is already present.
+  - [su, -l, omp, -c, "curl -fsSL https://omp.sh/install | sh -s -- --binary"]
+  - [su, -l, omp, -c, "grep -q '.local/bin' ~/.bashrc || echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc"]
+  - [su, -l, omp, -c, "$HOME/.local/bin/omp --version > /home/omp/omp-install.log 2>&1"]
+
+final_message: "omp-vm ready after $UPTIME s. ssh -p 2222 omp@127.0.0.1"
